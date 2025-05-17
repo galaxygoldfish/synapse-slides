@@ -19,9 +19,12 @@ OVERLAP_LENGTH = 0
 SHIFT_LENGTH = EPOCH_LENGTH - OVERLAP_LENGTH
 INDEX_CHANNEL = [1]
 
-# Eitan: low=4.0 high=13.0 BLINK_THRESHOLD=180 MIN_BLINK_INTERVAL=3
+# Eitan: low=4.0 high=13.0 BLINK_THRESHOLD=180 MIN_BLINK_INTERVAL=3  for motion
+# Max: low = .1, high = 3.0 Blink in mV = 29 for light to normal blinking
+# Omor: low= .1, high = 5.0; Theshold = 29 mV for blinding Med to hard 
 
-def bandpass(data, fs, low= 4.0 , high= 6.0 ,order=4):
+
+def bandpass(data, fs, low= 0.1 , high= 3.0 ,order=4):
     nyq = 0.5 * fs
     b, a = butter(order, [low/nyq, high/nyq], btype='band')
     return lfilter(b, a, data, axis=0)
@@ -55,9 +58,10 @@ def record_live():
     last_blink_time = 0
     blink_count = 0
     
-    BLINK_THRESHOLD = 120 # microvolts (adjust this based on your signal)
-    MIN_BLINK_INTERVAL =  2 # seconds (minimum interval between blinks)
-        
+    BLINK_THRESHOLD = 99 # microvolts (adjust this based on your signal)
+    MIN_BLINK_INTERVAL =  25 # seconds (minimum interval between blinks)
+
+    
 
     while True:
         # Obtain EEG data from the LSL stream
