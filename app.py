@@ -11,12 +11,17 @@ from pylsl import StreamInlet, resolve_byprop
 
 app = Flask(__name__)
 
-# TODO figure these out and comment
+# The length of the buffer in seconds to store EEG data
 BUFFER_LENGTH = 5
-EPOCH_LENGTH = 1
-OVERLAP_LENGTH = 0
-SHIFT_LENGTH = EPOCH_LENGTH - OVERLAP_LENGTH
 
+# The length of each epoch in seconds to analyze
+EPOCH_LENGTH = 1
+
+# The amount of overlap between epochs in seconds
+OVERLAP_LENGTH = 0
+
+# The length of the shift between epochs in seconds
+SHIFT_LENGTH = EPOCH_LENGTH - OVERLAP_LENGTH
 
 # The min and max thresholds here are the range of neural signal we consider to be a blink
 # These parameters must be relatively tuned to the user of the device
@@ -150,8 +155,11 @@ def record_live():
 
         # Blink detection: look for large spikes in the most recent data
         # Use the absolute value to detect both up and down spikes
+        
+        # The filtered epoch is the epoch data with non-blink frequencies removed
         filtered_epoch = bandpass(data_epoch, fs)
         filtered_epoch_abs = np.abs(filtered_epoch)
+        filtered_epoch_np = np.array(filtered_epoch)
 
         # If the local max of the epoch data falls within our defined threshold and max, we consider it a blink
         if np.max(filtered_epoch_abs) > BLINK_MIN_THRESHOLD and np.max(filtered_epoch_abs) < BLINK_MAX_THRESHOLD:
@@ -182,10 +190,7 @@ def record_live():
         # print(f"Timestamp : {now_time}")
         print(f"Blinks: {blink_count}")
 
-        # STILL NEED TO COMMENT AND FIGURE OUT LOGIC HERE -----
-
-        filtered_epoch_np = np.array(filtered_epoch)
-
+        # Append the filtered epoch data to the whole data set
         if len(whole_data) == 0:
             whole_data = filtered_epoch_np
             whole_timestamps = epoch_timestamps
@@ -193,16 +198,18 @@ def record_live():
             whole_data = np.append(whole_data, filtered_epoch_np)
             whole_timestamps = np.append(whole_timestamps, epoch_timestamps)
 
+        # Blink mask is a boolean array that indicates which samples are considered blinks
         filtered_epoch_flattened = bandpass(data_epoch, fs).flatten()
-        blink_mask = (np.abs(filtered_epoch_flattened) > BLINK_MIN_THRESHOLD) & (np.abs(filtered_epoch_flattened) < BLINK_MAX_THRESHOLD)
+        blink_mask = (np.abs(filtered_epoch_flattened) > BLINK_MIN_THRESHOLD) & \
+                     (np.abs(filtered_epoch_flattened) < BLINK_MAX_THRESHOLD)
 
+        # Check if there are any blinks in the current epoch
+        # If so, append the blink data to the blink data accumulator
         if blink_mask.any():
             blink_data_all = np.append(blink_data_all, filtered_epoch_flattened[blink_mask])
             blink_time_all = np.append(blink_time_all, epoch_timestamps[blink_mask])
 
-        # ------------------------------------------------------
-
-        # Once the runtime reaches the desired maximum number of seconds
+        # If the runtime reaches the desired maximum number of seconds
         if time.time() > start + RUNTIME_SECONDS:
 
             # Time to frequency domain converstion
@@ -221,15 +228,19 @@ def record_live():
             # Stop the entire program and stop recording signals
             break
 
-
 """
 Create the plot of the raw EEG data on the bottom subplot and the frequency domain
 on the top subplot
 
 Parameters:
-    TODO
+    freqs: The frequencies of the FFT
+    normalized_mag: The normalized magnitude of the FFT
+    whole_data: The entire neural recording, raw
+    whole_timestamps: The timestamps of the entire neural recording
+    now_time: The current unix timestamp
+    mag: The magnitude of the FFT
 
-TODO explain file naming
+The plot will also be saved as a PNG file named time_freq_<now_time>.png
 """
 def plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_time, mag):
     plt.figure(figsize=(10, 6))
@@ -248,12 +259,24 @@ def plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_ti
     plt.title("Live EEG Data Epoch")
     plt.xlabel("Sample")
     plt.ylabel("Amplitude")
-    plt.savefig(f"FINAL_time&freq{now_time}.png")
-    df_time = pd.DataFrame({'timestamp': whole_timestamps, 'eeg_value': whole_data})
-    df_time.to_csv('time_data_with_timestamps.csv', index=False)
+    plt.savefig(f"time_freq_{int(now_time)}.png")
+    
 
 """
-TODO comment
+Create a plot of the frequency domain for all samples, blink-only samples, and plot the raw
+EEG data with the classified blink times highlighted in red
+
+Parameters:
+    blink_data_all: The EEG data at the blink timestamps
+    fs: Sampling frequency in HZ
+    freqs: The frequencies of the FFT
+    normalized_mag: The normalized magnitude of the FFT
+    whole_timestamps: The timestamps of the entire neural recording
+    whole_data: The entire neural recording, raw
+    now_time: The current unix timestamp
+    blink_time_all: The timestamps of the blinks
+
+This will also save the figure as a PNG file named blink_vs_all_<now_time>.png
 """
 def plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_timestamps, whole_data, now_time, blink_time_all):
     n_blink = len(blink_data_all)
@@ -261,26 +284,25 @@ def plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_ti
         fft_blink  = np.fft.rfft(blink_data_all)
         mag_blink  = np.abs(fft_blink) / n_blink
         freqs_blnk = np.fft.rfftfreq(n_blink, d=1/fs)
-    else:                                      # no blink samples collected
+    else: # no blink samples collected
         mag_blink, freqs_blnk = np.array([0]), np.array([0])
-
+    # Normalize the blink magnitude
     mag_blink_max = np.max(mag_blink)
     normalized_mag_blink = mag_blink/mag_blink_max
-
     plt.figure(figsize=(11, 7))
-
+    # All samples frequency domain
     plt.subplot(3, 1, 1)
     plt.plot(freqs, normalized_mag)
     plt.title('All Samples – Frequency Domain')
     plt.ylabel('Magnitude (µV)')
     plt.xlim(0, 10)
-
+    # Blink only sample frequency domain
     plt.subplot(3, 1, 2)
     plt.plot(freqs_blnk, normalized_mag_blink, color='crimson')
-    plt.title('BLINK-ONLY Samples – Frequency Domain')
+    plt.title('Blink Samples – Frequency Domain')
     plt.ylabel('Magnitude (µV)')
     plt.xlim(0, 10)
-
+    # Raw data with blink samples highlighted
     plt.subplot(3, 1, 3)
     plt.plot(whole_timestamps, whole_data, label='Full stream')
     plt.scatter(blink_time_all, blink_data_all, color='crimson', linewidth=2, label='Blink samples')
@@ -288,21 +310,25 @@ def plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_ti
     plt.xlabel('Sample')
     plt.ylabel('Amplitude (µV)')
     plt.legend(loc='upper right')
-
     plt.tight_layout()
     plt.savefig(f'blink_vs_all_{int(now_time)}.png')
-    plt.show()
 
 """
-TODO comment
+Saves the raw EEG data to a CSV file with two columns (timestamp, voltage)
+
+Parameters:
+    blink_time_all: The timestamps of the blinks
+    blink_data_all: The EEG data at the blink timestamps
+    whole_timestamps: The timestamps of the entire neural recording
+    whole_data: The entire neural recording, raw
+    now_time: The current unix timestamp
 """
-def export_raw_csv(blink_time_all, blink_data_all):
-    pd.DataFrame({
-        't': blink_time_all,
-        'eeg': blink_data_all
-    }).to_csv('blink_only_time_series.csv', index=False)
+def export_raw_csv(blink_time_all, blink_data_all, whole_timestamps, whole_data, now_time):
+    df_time = pd.DataFrame({'timestamp': whole_timestamps, 'eeg_value': whole_data})
+    df_time.to_csv(f'time_data_with_timestamps_{int(now_time)}.csv', index=False)
+    df_blink = pd.DataFrame({'t': blink_time_all,'eeg': blink_data_all})
+    df_blink.to_csv(f'blink_only_time_series_{int(now_time)}.csv', index=False)
             
-
 """
 Convert data from a time-based domain to a frequency-based domain using
 a Fast Fourier Transform (FFT)
@@ -311,7 +337,9 @@ Parameters:
     whole_data: The entire neural recording, raw
 
 Returns:
-    TODO
+    normalized_mag: The normalized magnitude of the FFT
+    freqs: The frequencies of the FFT
+    mag: The magnitude of the FFT
 """
 def time_to_frequency_domain(whole_data):
     n = len(whole_data)
