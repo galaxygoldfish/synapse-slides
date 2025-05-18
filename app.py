@@ -272,10 +272,10 @@ def plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_ti
     plt.xlim([0, 10])
     plt.ylabel("Magnitude")
     df_freq = pd.DataFrame({'frequencies': freqs, 'magnitude': mag})
-    df_freq.to_csv('freq_data_with_timestamps.csv', index=False)
+    df_freq.to_csv('freq_data_with_timestamps_{int(now_time)}.csv', index=False)
     # Second subplot (bottom)
     plt.subplot(2, 1, 2)
-    plt.plot(whole_data)
+    plt.plot(whole_timestamps, whole_data)
     plt.title("Live EEG Data Epoch")
     plt.xlabel("Sample")
     plt.ylabel("Amplitude")
@@ -368,7 +368,7 @@ def time_to_frequency_domain(whole_data, fs):
     freqs = np.fft.rfftfreq(n, d = 1 / fs)
     mag_max = np.max(mag)
     normalized_mag = mag/mag_max
-    return normalized_mag, freqs, mag
+    return freqs, normalized_mag, mag
 
 """
 Callback to be invoked when a single blink action is detected
