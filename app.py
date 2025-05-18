@@ -37,7 +37,7 @@ BLINK_MAX_THRESHOLD = 1200
 SEQUENCE_COUNT =  2
 
 # Minimum interval between blinks, in seconds
-MIN_BLINK_INTERVAL =  4
+MIN_BLINK_INTERVAL =  6
 
 # This is the channel from Muse that we want to record from
 INDEX_CHANNEL = [1]
@@ -132,9 +132,6 @@ def record_live():
     blink_times = []
     last_slide_time = 0
 
-    times_blinked = np.array([])
-    magnitude_blinked = np.array([])
-
     while True:
 
         # The current unix timestamp for this recording step
@@ -166,11 +163,6 @@ def record_live():
         filtered_epoch_abs = np.abs(filtered_epoch)
         filtered_epoch_np = np.array(filtered_epoch)
 
-        MAX_AMP = np.max(filtered_epoch)
-        MAX_AMP_index = np.where(data_epoch == MAX_AMP)
-        print(MAX_AMP)
-        print(MAX_AMP_index)
-
         # If the local max of the epoch data falls within our defined threshold and max, we consider it a blink
         if np.max(filtered_epoch_abs) > BLINK_MIN_THRESHOLD and np.max(filtered_epoch_abs) < BLINK_MAX_THRESHOLD:
            
@@ -186,20 +178,14 @@ def record_live():
                 last_blink_time = now_time
                 blink_times.append(now_time)
 
-                # blink_times = [i for i in blink_times if now_time - i <= SEQUENCE_WINDOW]
-                # print(blink_times)
-                print(blink_times)
-
-                print(times_blinked)
-                print(magnitude_blinked)
-                print(epoch_timestamps)
-                # print(epoch_timestamps[MAX_AMP_index])
-                print()
-                # times_blinked = np.append(times_blinked, epoch_timestamps[MAX_AMP_index])
-                # magnitude_blinked = np.append(magnitude_blinked, MAX_AMP)
-
-                # If the number of blinks aligns with our SEQUENCE_COUNT, we call the sequence blink action               
-                if len(blink_times) >= SEQUENCE_COUNT:
+                # If the number of blinks aligns with our SEQUENCE_COUNT, we call the sequence blink action   
+                if (len(blink_times) >= SEQUENCE_COUNT):
+                    # print(len(blink_times))
+                    # print(blink_times[blink_count - 1]) 
+                    # print(blink_times[blink_count - 2])
+                    # time_diff = blink_times[len(blink_times) - 1] - blink_times[len(blink_times) - 2]
+                    # print(time_diff)
+                    # if (time_diff <= SEQUENCE_WINDOW):
                     sequence_blink_action()
                     blink_times.clear()
                 # Otherwise, it is classified as a single blink action
@@ -322,6 +308,7 @@ def plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_ti
     plt.xlim(0, 10)
     # Raw data with blink samples highlighted
     plt.subplot(3, 1, 3)
+    plt.ylim(-1500, 1500)
     plt.plot(whole_timestamps, whole_data, label='Full stream')
     plt.scatter(blink_time_all, blink_data_all, color='crimson', linewidth=2, label='Blink samples')
     # Make a purple scatter plot with only the local max and mins of the blink_data_all
@@ -335,7 +322,7 @@ def plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_ti
         plt.scatter(
             np.array(blink_time_all)[extrema_indices],
             np.array(blink_data_all)[extrema_indices],
-            color='purple', linewidth=2, label='Blink local max/min'
+            color='yellow', linewidth=2, label='Blink local max/min'
         )
 
     plt.title('Time-Series with Blink Samples Marked')
