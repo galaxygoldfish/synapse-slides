@@ -7,7 +7,7 @@ from scipy.signal import butter, lfilter
 import pyautogui
 
 # Import functions from the utils module
-from utils import update_buffer, get_last_data
+from utils import epoch, update_buffer, get_last_data
 from pylsl import StreamInlet, resolve_byprop
 
 app = Flask(__name__)
@@ -96,6 +96,9 @@ def record_live():
     blink_times = []
     last_slide_time = 0
 
+    times_blinked = np.array([])
+    magnitude_blinked = np.array([])
+
     while True:
         now_time = time.time()
         # Obtain EEG data from the LSL stream
@@ -123,6 +126,11 @@ def record_live():
 
         filtered_epoch_abs = np.abs(filtered_epoch)
 
+        MAX_AMP = np.max(filtered_epoch)
+        MAX_AMP_index = np.where(data_epoch == MAX_AMP)
+        print(MAX_AMP)
+        print(MAX_AMP_index)
+
         if np.max(filtered_epoch_abs) > BLINK_THRESHOLD and np.max(filtered_epoch_abs) < MAX_THRESHOLD:
             
            if now_time - last_blink_time > MIN_BLINK_INTERVAL:
@@ -132,6 +140,14 @@ def record_live():
                 blink_times.append(now_time)
                 # blink_times = [i for i in blink_times if now_time - i <= SEQUENCE_WINDOW]
                 print(blink_times)
+
+                print(times_blinked)
+                print(magnitude_blinked)
+                print(epoch_timestamps)
+                print(epoch_timestamps[MAX_AMP_index])
+                print()
+                times_blinked = np.append(times_blinked, epoch_timestamps[MAX_AMP_index])
+                magnitude_blinked = np.append(magnitude_blinked, MAX_AMP)
 
                 if len(blink_times) >= SEQUENCE_COUNT:
                     print("Triple blink detected: toggling play/pause")
@@ -238,6 +254,7 @@ def record_live():
             plt.subplot(3, 1, 3)
             plt.plot(whole_timestamps, whole_data, label='Full stream')
             plt.scatter(blink_time_all, blink_data_all, color='crimson', linewidth=2, label='Blink samples')
+            plt.scatter(times_blinked, magnitude_blinked, color = 'blue', linewidth = 2, label = 'Counted Blinks')
             plt.title('Time-Series with Blink Samples Marked')
             plt.xlabel('Sample')
             plt.ylabel('Amplitude (µV)')
