@@ -233,7 +233,7 @@ def record_live():
         if time.time() > start + RUNTIME_SECONDS:
 
             # Time to frequency domain converstion
-            freqs, normalized_mag, mag = time_to_frequency_domain(whole_data)
+            freqs, normalized_mag, mag = time_to_frequency_domain(whole_data, fs)
             
             # Create the plot with the raw data (not filtered for blinks)
             plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_time, mag)
@@ -361,11 +361,11 @@ Returns:
     freqs: The frequencies of the FFT
     mag: The magnitude of the FFT
 """
-def time_to_frequency_domain(whole_data):
+def time_to_frequency_domain(whole_data, fs):
     n = len(whole_data)
     fft_vals = np.fft.rfft(whole_data)
     mag = np.abs(fft_vals) / n
-    freqs = np.fft.rfftfreq(n, d = 1 / 260)
+    freqs = np.fft.rfftfreq(n, d = 1 / fs)
     mag_max = np.max(mag)
     normalized_mag = mag/mag_max
     return normalized_mag, freqs, mag
