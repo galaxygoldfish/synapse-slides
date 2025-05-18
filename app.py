@@ -18,9 +18,10 @@ EPOCH_LENGTH = 1
 OVERLAP_LENGTH = 0
 SHIFT_LENGTH = EPOCH_LENGTH - OVERLAP_LENGTH
 INDEX_CHANNEL = [1]
-
+                 
 # Eitan: low=4.0 high=13.0 BLINK_THRESHOLD=180 MIN_BLINK_INTERVAL=3  for motion
 # Max: low = .1, high = 3.0 Blink in mV = 29 for light to normal blinking
+# Max : low = .1, high = 3.0; max mV = 200; min mV = 42 for light blinking and movement
 # Omor: low= .1, high = 5.0; Theshold = 29 mV for blinding Med to hard 
 
 
@@ -58,12 +59,17 @@ def record_live():
     last_blink_time = 0
     blink_count = 0
     
-    BLINK_THRESHOLD = 99 # microvolts (adjust this based on your signal)
-    MIN_BLINK_INTERVAL =  25 # seconds (minimum interval between blinks)
+    BLINK_THRESHOLD =  43 #  microvolts (adjust this based on your signal)
+    MAX_THRESHOLD = 200
+    MIN_BLINK_INTERVAL =  1 # seconds (minimum interval between blinks)
 
     
+    start = time.time();
+    whole_data = np.array([]);
+    whole_data = np.array([]);
 
     while True:
+        now_time = time.time()
         # Obtain EEG data from the LSL stream
         eeg_data, timestamp = inlet.pull_chunk(
             timeout=1, max_samples=int(SHIFT_LENGTH * fs))
@@ -81,28 +87,84 @@ def record_live():
         # Get newest samples from the buffer
         data_epoch = get_last_data(eeg_buffer,
                                    EPOCH_LENGTH * fs)
-        
+        epoch_timestamps = np.linspace(now_time - (len(data_epoch) / fs), now_time, len(data_epoch))
+
         # Blink detection: look for large spikes in the most recent data
         # Use the absolute value to detect both up and down spikes
         filtered_epoch = bandpass(data_epoch, fs)
-        if np.max(np.abs(filtered_epoch)) > BLINK_THRESHOLD:
-            now = time.time()
-            if now - last_blink_time > MIN_BLINK_INTERVAL:
-                print("Blink detected!")
-                pyautogui.press("right")
+        if np.max(np.abs(filtered_epoch)) > BLINK_THRESHOLD and np.max(np.abs(filtered_epoch)) < MAX_THRESHOLD:
+            
+            if now_time - last_blink_time > MIN_BLINK_INTERVAL:
+                #print( "Blink detected!")
+                #pyautogui.press("right")
                 blink_count += 1
-                last_blink_time = now
+                last_blink_time = now_time
 
         band_powers = compute_band_powers(data_epoch, fs)
         delta, theta, alpha, beta = band_powers
 
-        print(f"Blinks: {blink_count}")
+        print(f"Timestamp : {now_time}")
+        #print(f"Blinks: {blink_count}")
+
+        
 
         # Compute band powers
         band_powers = compute_band_powers(data_epoch, fs)
         delta, theta, alpha, beta = band_powers
         
-        #rint(data_epoch)
+        filtered_epoch_np = np.array(filtered_epoch)
+        if len(whole_data) == 0:
+            whole_data = filtered_epoch_np
+            whole_timestamps = epoch_timestamps
+        else:
+            whole_data = np.append(whole_data, filtered_epoch_np)
+            whole_timestamps = np.append(whole_timestamps, epoch_timestamps)
+
+        # --- Add this block for live plotting ---
+        # plt.ion()  # Turn on interactive mode
+        # plt.clf()  # Clear the current figure
+        # plt.plot(data_epoch)
+        # plt.title("Live EEG Data Epoch")
+        # plt.xlabel("Sample")
+        # plt.ylabel("Amplitude")
+        # plt.savefig(f"final_data_epoch{time.time()}.png")
+        # plt.pause(0.001)
+
+        if time.time() > start + 60:
+            # Time to frequency domain converstion (FFT)
+            n = len(whole_data)
+            fft_vals = np.fft.rfft(whole_data)
+            mag = np.abs(fft_vals) / n
+            freqs = np.fft.rfftfreq(n, d=1/260)
+            
+            plt.figure(figsize=(10, 6))
+
+            # First subplot (top)
+            plt.subplot(2, 1, 1)
+            plt.plot(freqs, mag)
+            plt.title("Frequency Domain")
+            plt.xlabel("Frequency Hz")
+            plt.xlim([0, 10])
+            plt.ylabel("Magnitude")
+            # plt.savefig(f"FINAL_freqs{now_time}.png")
+            df_freq = pd.DataFrame({'frequencies': freqs, 'magnitude': mag})
+            df_freq.to_csv('freq_data_with_timestamps.csv', index=False)
+
+            # Second subplot (bottom)
+            plt.subplot(2, 1, 2)
+            plt.plot(whole_data)
+            plt.title("Live EEG Data Epoch")
+            plt.xlabel("Sample")
+            plt.ylabel("Amplitude")
+            plt.savefig(f"FINAL_time&freq{now_time}.png")
+            df_time = pd.DataFrame({'timestamp': whole_timestamps, 'eeg_value': whole_data})
+            df_time.to_csv('time_data_with_timestamps.csv', index=False)
+
+            plt.tight_layout()
+            break
+
+    
+    
             
 def record(duration_seconds=10, output_file='eeg_bandpowers.csv'):
     # Search for active LSL streams
