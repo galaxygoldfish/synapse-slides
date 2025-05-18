@@ -3,7 +3,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from flask import Flask
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, lfilter, argrelextrema
 import pyautogui
 
 from utils import update_buffer, get_last_data
@@ -260,7 +260,6 @@ def plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_ti
     plt.xlabel("Sample")
     plt.ylabel("Amplitude")
     plt.savefig(f"time_freq_{int(now_time)}.png")
-    
 
 """
 Create a plot of the frequency domain for all samples, blink-only samples, and plot the raw
@@ -306,6 +305,20 @@ def plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_ti
     plt.subplot(3, 1, 3)
     plt.plot(whole_timestamps, whole_data, label='Full stream')
     plt.scatter(blink_time_all, blink_data_all, color='crimson', linewidth=2, label='Blink samples')
+    # Make a purple scatter plot with only the local max and mins of the blink_data_all
+    
+    if len(blink_data_all) > 2:
+        max_indices = argrelextrema(blink_data_all, np.greater)[0]
+        min_indices = argrelextrema(blink_data_all, np.less)[0]
+        # Combine and sort indices
+        extrema_indices = np.sort(np.concatenate((max_indices, min_indices)))
+        # Plot local maxima and minima as purple points
+        plt.scatter(
+            np.array(blink_time_all)[extrema_indices],
+            np.array(blink_data_all)[extrema_indices],
+            color='purple', linewidth=2, label='Blink local max/min'
+        )
+
     plt.title('Time-Series with Blink Samples Marked')
     plt.xlabel('Sample')
     plt.ylabel('Amplitude (µV)')
