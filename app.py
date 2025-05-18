@@ -56,7 +56,10 @@ def record_live():
     blink_count = 0
     
     BLINK_THRESHOLD = 120 # microvolts (adjust this based on your signal)
-    MIN_BLINK_INTERVAL =  2 # seconds (minimum interval between blinks)
+    MIN_BLINK_INTERVAL =  2    # seconds (minimum interval between blinks)
+    SEQUENCE_WINDOW    = 3         # seconds in which to count triple‐blinks
+    SEQUENCE_COUNT     = 3         # number of blinks needed in that window
+    MIN_SLIDE_INTERVAL = 25        # seconds between single‐blink slides
         
 
     while True:
@@ -83,6 +86,28 @@ def record_live():
         filtered_epoch = bandpass(data_epoch, fs)
         if np.max(np.abs(filtered_epoch)) > BLINK_THRESHOLD:
             now = time.time()
+
+
+            # video or media resume or pauseing code: 
+            # 1) append this blink timestamp
+            blink_times.append(now)
+            # 2) purge any blinks older than SEQUENCE_WINDOW
+            blink_times = [t for t in blink_times if now - t <= SEQUENCE_WINDOW]
+
+            # 3) if we have SEQUENCE_COUNT blinks in the window → play/pause
+            if len(blink_times) >= SEQUENCE_COUNT:
+                print("Triple‐blink detected: toggling play/pause")
+                pyautogui.press("playpause")       # Windows media key
+                blink_times.clear()                 # reset
+                last_slide_time = now               # avoid immediate slide
+            # 4) else if enough time passed since last slide → next slide
+            elif now - last_slide_time > MIN_SLIDE_INTERVAL:
+                print("Single blink: advancing slide")
+                pyautogui.press("right")
+                last_slide_time = now
+            #ending of the media code
+
+
             if now - last_blink_time > MIN_BLINK_INTERVAL:
                 print("Blink detected!")
                 pyautogui.press("right")
@@ -173,3 +198,5 @@ def record(duration_seconds=10, output_file='eeg_bandpowers.csv'):
 
 if __name__ == '__main__':
     record_live()
+
+
