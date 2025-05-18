@@ -8,7 +8,6 @@ import pyautogui
 
 from utils import update_buffer, get_last_data
 # Import functions from the utils module
-from utils import epoch, update_buffer, get_last_data
 from pylsl import StreamInlet, resolve_byprop
 
 app = Flask(__name__)
@@ -129,7 +128,7 @@ def record_live():
     # TODO not sure if we still use this
     SEQUENCE_WINDOW = 5 #seconds or time interval for the thripple blinks
 
-    # Local list that is reset at each time step holding timestamps of blink events
+    # TODO Local list that is reset at each time step holding timestamps of blink events
     blink_times = []
     last_slide_time = 0
 
