@@ -63,10 +63,18 @@ def record_live():
     MAX_THRESHOLD = 200
     MIN_BLINK_INTERVAL =  1 # seconds (minimum interval between blinks)
 
+
+    #media resume and pause variables 
+    SEQUENCE_WINDOW = 3  #seconds or time interval for the thripple blinks
+    SEQUENCE_COUNT = 3  #how many times Max have to blink under the window
+    blink_times = []
+    last_slide_time = 0
+
+
     
-    start = time.time();
-    whole_data = np.array([]);
-    whole_data = np.array([]);
+    start = time.time()
+    whole_data = np.array([])
+    whole_data = np.array([])
 
     while True:
         now_time = time.time()
@@ -95,10 +103,22 @@ def record_live():
         if np.max(np.abs(filtered_epoch)) > BLINK_THRESHOLD and np.max(np.abs(filtered_epoch)) < MAX_THRESHOLD:
             
             if now_time - last_blink_time > MIN_BLINK_INTERVAL:
-                #print( "Blink detected!")
-                #pyautogui.press("right")
+                print( "Blink detected!")
+                pyautogui.press("right")
                 blink_count += 1
                 last_blink_time = now_time
+                blink_times.append(now_time)
+                blink_times = [t for t in blink_times if now_time - t <= SEQUENCE_WINDOW]
+
+                if len(blink_times) >= SEQUENCE_COUNT:
+                    print("Triple blink detected: toggling play/pause")
+                    pyautogui.press("playpause")  # toggles media play/pause
+                    blink_times.clear()
+                    last_slide_time = now_time
+                elif now_time - last_slide_time > MIN_BLINK_INTERVAL:
+                    print("Single blink detected: advancing slide")
+                    pyautogui.press("right")  # goes to next slide
+                    last_slide_time = now_time
 
         band_powers = compute_band_powers(data_epoch, fs)
         delta, theta, alpha, beta = band_powers
