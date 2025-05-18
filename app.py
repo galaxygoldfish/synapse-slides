@@ -7,6 +7,7 @@ from scipy.signal import butter, lfilter, argrelextrema
 import pyautogui
 
 from utils import update_buffer, get_last_data
+# Import functions from the utils module
 from pylsl import StreamInlet, resolve_byprop
 
 app = Flask(__name__)
@@ -127,8 +128,12 @@ def record_live():
     # TODO not sure if we still use this
     SEQUENCE_WINDOW = 5 #seconds or time interval for the thripple blinks
 
-    # Local list that is reset at each time step holding timestamps of blink events
+    # TODO Local list that is reset at each time step holding timestamps of blink events
     blink_times = []
+    last_slide_time = 0
+
+    times_blinked = np.array([])
+    magnitude_blinked = np.array([])
 
     while True:
 
@@ -161,6 +166,11 @@ def record_live():
         filtered_epoch_abs = np.abs(filtered_epoch)
         filtered_epoch_np = np.array(filtered_epoch)
 
+        MAX_AMP = np.max(filtered_epoch)
+        MAX_AMP_index = np.where(data_epoch == MAX_AMP)
+        print(MAX_AMP)
+        print(MAX_AMP_index)
+
         # If the local max of the epoch data falls within our defined threshold and max, we consider it a blink
         if np.max(filtered_epoch_abs) > BLINK_MIN_THRESHOLD and np.max(filtered_epoch_abs) < BLINK_MAX_THRESHOLD:
            
@@ -178,6 +188,15 @@ def record_live():
 
                 # blink_times = [i for i in blink_times if now_time - i <= SEQUENCE_WINDOW]
                 # print(blink_times)
+                print(blink_times)
+
+                print(times_blinked)
+                print(magnitude_blinked)
+                print(epoch_timestamps)
+                # print(epoch_timestamps[MAX_AMP_index])
+                print()
+                # times_blinked = np.append(times_blinked, epoch_timestamps[MAX_AMP_index])
+                # magnitude_blinked = np.append(magnitude_blinked, MAX_AMP)
 
                 # If the number of blinks aligns with our SEQUENCE_COUNT, we call the sequence blink action               
                 if len(blink_times) >= SEQUENCE_COUNT:
@@ -213,7 +232,7 @@ def record_live():
         if time.time() > start + RUNTIME_SECONDS:
 
             # Time to frequency domain converstion
-            freqs, normalized_mag, mag = time_to_frequency_domain(whole_data)
+            freqs, normalized_mag, mag = time_to_frequency_domain(whole_data, fs)
             
             # Create the plot with the raw data (not filtered for blinks)
             plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_time, mag)
@@ -223,7 +242,7 @@ def record_live():
             plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_timestamps, whole_data, now_time, blink_time_all)
 
             # Export raw data as csv (may remove later)
-            export_raw_csv(blink_time_all, blink_data_all)
+            export_raw_csv(blink_time_all, blink_data_all, whole_timestamps, whole_data, now_time)
             
             # Stop the entire program and stop recording signals
             break
@@ -252,10 +271,10 @@ def plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_ti
     plt.xlim([0, 10])
     plt.ylabel("Magnitude")
     df_freq = pd.DataFrame({'frequencies': freqs, 'magnitude': mag})
-    df_freq.to_csv('freq_data_with_timestamps.csv', index=False)
+    df_freq.to_csv('freq_data_with_timestamps_{int(now_time)}.csv', index=False)
     # Second subplot (bottom)
     plt.subplot(2, 1, 2)
-    plt.plot(whole_data)
+    plt.plot(whole_timestamps, whole_data)
     plt.title("Live EEG Data Epoch")
     plt.xlabel("Sample")
     plt.ylabel("Amplitude")
@@ -354,14 +373,14 @@ Returns:
     freqs: The frequencies of the FFT
     mag: The magnitude of the FFT
 """
-def time_to_frequency_domain(whole_data):
+def time_to_frequency_domain(whole_data, fs):
     n = len(whole_data)
     fft_vals = np.fft.rfft(whole_data)
     mag = np.abs(fft_vals) / n
-    freqs = np.fft.rfftfreq(n, d = 1 / 260)
+    freqs = np.fft.rfftfreq(n, d = 1 / fs)
     mag_max = np.max(mag)
     normalized_mag = mag/mag_max
-    return normalized_mag, freqs, mag
+    return freqs, normalized_mag, mag
 
 """
 Callback to be invoked when a single blink action is detected
@@ -384,6 +403,5 @@ def sequence_blink_action():
     print("Double blink detected")
     pyautogui.press("mediaplaypause")
 
-# Main function to run when the script is executed
 if __name__ == '__main__':
     record_live()
