@@ -40,14 +40,14 @@ SEQUENCE_COUNT =  2
 MIN_BLINK_INTERVAL =  4
 
 # This is the channel from Muse that we want to record from
-INDEX_CHANNEL = [1]
+INDEX_CHANNEL = [0, 1]
 
 # Time to record and respond to the neural signal
-RUNTIME_SECONDS = 60
+RUNTIME_SECONDS = 5
 
 """
 Apply a Butterworth bandpass filter to the neural input.
-This essentially filters out all frequencies that fall outside of the [low, high] range
+This essentially filters out all frequencies that fall outside of the [low, high] range.
 In our case, we use this to filter out signals that might be unrelated to blinking
 
 Parameters:
@@ -94,6 +94,9 @@ Two blinks: (Within a set time window) Play/pause key is pressed
 """
 def record_live():
     
+    # The unix timestamp when we start recording signals
+    start = time.time()
+
     # Receive data stream from Muse
     inlet = connect_eeg()
 
@@ -112,21 +115,18 @@ def record_live():
 
     # The number of total blinks in the session
     blink_count = 0
-    
-    # The unix timestamp when we start recording signals
-    start = time.time()
 
     # Entire raw data set accumulator 
-    whole_data = np.array([])
+    entire_raw_data = np.array([])
 
     # Entire set of EEG voltage traces at blink times
     blink_data_all = np.array([])
 
     # Entire set of blink timestamps
-    blink_time_all = np.array([]) 
+    blink_time_all = np.array([])
 
     # TODO not sure if we still use this
-    SEQUENCE_WINDOW = 5 #seconds or time interval for the thripple blinks
+    SEQUENCE_WINDOW = 5 #seconds or time interval for the triple blinks
 
     # TODO Local list that is reset at each time step holding timestamps of blink events
     blink_times = []
@@ -135,117 +135,186 @@ def record_live():
     times_blinked = np.array([])
     magnitude_blinked = np.array([])
 
-    while True:
+    collective_eeg_data = np.empty((0, 5))
 
-        # The current unix timestamp for this recording step
-        now_time = time.time()
+    now_time = time.time()
+    while now_time < start + RUNTIME_SECONDS:
 
         # Obtain EEG data from the LSL stream
         eeg_data, timestamp = inlet.pull_chunk(
             timeout=1, max_samples=int(SHIFT_LENGTH * fs))
-        if len(eeg_data) == 0:
-            continue
+        np_eeg_data = np.asarray(eeg_data)
+        print(np_eeg_data)
+        if (not(np_eeg_data.shape[0] == 0)):
+            collective_eeg_data = np.append(collective_eeg_data, np_eeg_data, axis = 0)
+            print(f"collective_eeg_data LOOP: {collective_eeg_data}")
+            print(f"Loop running {now_time}", flush=True)
 
-        # Only keep the channel we're interested in
-        ch_data = np.array(eeg_data)[:, INDEX_CHANNEL]
+            # If no data is received or if the data are just zeros, continue to the next iteration
+            if (len(eeg_data) == 0 or eeg_data[0] == [0, 0, 0, 0, 0]):
+                print(f"time {now_time}", flush=True)
+                continue 
+            ''' check if the seond condiitonal actuall does something '''
 
-        # Update EEG buffer with the new data
-        eeg_buffer, filter_state = update_buffer(
-            eeg_buffer, ch_data, notch=True,
-            filter_state=filter_state)
+            # Only keep the channel we're interested in
+            ch_data = np.array(eeg_data)[:, INDEX_CHANNEL[0]]
+            # print(f'eeg_data: {eeg_data}')
+            # print(f'channel data: {ch_data}')
+            ''' no need for this line if we want data from all channels '''
 
-        # Get newest samples from the buffer
-        data_epoch = get_last_data(eeg_buffer, EPOCH_LENGTH * fs)
-        epoch_timestamps = np.linspace(now_time - (len(data_epoch) / fs), now_time, len(data_epoch))
+            # Update EEG buffer with the new data
+            eeg_buffer, filter_state = update_buffer(
+                eeg_buffer, ch_data, notch=True,
+                filter_state=filter_state)
+            ''' isn't eeg_buffer input just a list of zeros? should check this. this would
+                mean that eeg_buffer output is just the list of zeros + ch_data '''
 
-        # Blink detection: look for large spikes in the most recent data
-        # Use the absolute value to detect both up and down spikes
-        
-        # The filtered epoch is the epoch data with non-blink frequencies removed
-        filtered_epoch = bandpass(data_epoch, fs)
-        filtered_epoch_abs = np.abs(filtered_epoch)
-        filtered_epoch_np = np.array(filtered_epoch)
+            # Get newest samples from the buffer
+            epoch_data = get_last_data(eeg_buffer, EPOCH_LENGTH * fs)
+            epoch_timestamps = np.linspace(start, now_time, len(epoch_data))
+            # print(f'epoch_data: {epoch_data}')
+            # print(f'time: {epoch_timestamps} + now_time, epoch_data, fs {now_time} {epoch_data} {fs}')
 
-        MAX_AMP = np.max(filtered_epoch)
-        MAX_AMP_index = np.where(data_epoch == MAX_AMP)
-        print(MAX_AMP)
-        print(MAX_AMP_index)
-
-        # If the local max of the epoch data falls within our defined threshold and max, we consider it a blink
-        if np.max(filtered_epoch_abs) > BLINK_MIN_THRESHOLD and np.max(filtered_epoch_abs) < BLINK_MAX_THRESHOLD:
-           
-           # To filter out extraneous blinks, false positives, we check if the MIN_BLINK_INTERVAL
-           # has passed since the last blink, so that there is a cooldown period between actions
-           if now_time - last_blink_time > MIN_BLINK_INTERVAL:
-                
-                # Record the blink
-                print("Blink detected!")
-                blink_count += 1
-                
-                # Append to our local list of blink times in the current step
-                last_blink_time = now_time
-                blink_times.append(now_time)
-
-                # blink_times = [i for i in blink_times if now_time - i <= SEQUENCE_WINDOW]
-                # print(blink_times)
-                print(blink_times)
-
-                print(times_blinked)
-                print(magnitude_blinked)
-                print(epoch_timestamps)
-                # print(epoch_timestamps[MAX_AMP_index])
-                print()
-                # times_blinked = np.append(times_blinked, epoch_timestamps[MAX_AMP_index])
-                # magnitude_blinked = np.append(magnitude_blinked, MAX_AMP)
-
-                # If the number of blinks aligns with our SEQUENCE_COUNT, we call the sequence blink action               
-                if len(blink_times) >= SEQUENCE_COUNT:
-                    sequence_blink_action()
-                    blink_times.clear()
-                # Otherwise, it is classified as a single blink action
-                else:
-                    single_blink_action()
-
-        # print(f"Timestamp : {now_time}")
-        print(f"Blinks: {blink_count}")
-
-        # Append the filtered epoch data to the whole data set
-        if len(whole_data) == 0:
-            whole_data = filtered_epoch_np
-            whole_timestamps = epoch_timestamps
-        else:
-            whole_data = np.append(whole_data, filtered_epoch_np)
-            whole_timestamps = np.append(whole_timestamps, epoch_timestamps)
-
-        # Blink mask is a boolean array that indicates which samples are considered blinks
-        filtered_epoch_flattened = bandpass(data_epoch, fs).flatten()
-        blink_mask = (np.abs(filtered_epoch_flattened) > BLINK_MIN_THRESHOLD) & \
-                     (np.abs(filtered_epoch_flattened) < BLINK_MAX_THRESHOLD)
-
-        # Check if there are any blinks in the current epoch
-        # If so, append the blink data to the blink data accumulator
-        if blink_mask.any():
-            blink_data_all = np.append(blink_data_all, filtered_epoch_flattened[blink_mask])
-            blink_time_all = np.append(blink_time_all, epoch_timestamps[blink_mask])
-
-        # If the runtime reaches the desired maximum number of seconds
-        if time.time() > start + RUNTIME_SECONDS:
-
-            # Time to frequency domain converstion
-            freqs, normalized_mag, mag = time_to_frequency_domain(whole_data, fs)
+            # Blink detection: look for large spikes in the most recent data
+            # Use the absolute value to detect both up and down spikes
             
-            # Create the plot with the raw data (not filtered for blinks)
-            plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_time, mag)
-     
-            # Create plot of frequency domain for raw and only during blink times,
-            # and show in the raw EEG data where we predict blinks to be happening, highlighted in red
-            plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_timestamps, whole_data, now_time, blink_time_all)
+            # The filtered epoch is the epoch data with non-blink frequencies removed
+            filtered_epoch = bandpass(epoch_data, fs)
+            filtered_epoch_abs = np.abs(filtered_epoch)
+            filtered_epoch_np = np.array(filtered_epoch)
 
-            # Export raw data as csv (may remove later)
-            export_raw_csv(blink_time_all, blink_data_all, whole_timestamps, whole_data, now_time)
+            MAX_AMP = np.max(filtered_epoch)
+            MAX_AMP_index = np.where(epoch_data == MAX_AMP)
+            # print(MAX_AMP)
+            # print(MAX_AMP_index)
+
+            # Append the filtered epoch data to the whole data set
+            if len(entire_raw_data) == 0:
+                entire_raw_data = filtered_epoch_np
+                whole_timestamps = epoch_timestamps
+            else:
+                entire_raw_data = np.concatenate((entire_raw_data, filtered_epoch_np))
+                whole_timestamps = np.concatenate((whole_timestamps, epoch_timestamps))
+
+            # If the local max of the epoch data falls within our defined threshold and max, we consider it a blink
+            if np.max(filtered_epoch_abs) > BLINK_MIN_THRESHOLD and np.max(filtered_epoch_abs) < BLINK_MAX_THRESHOLD:
             
-            # Stop the entire program and stop recording signals
-            break
+                # To filter out extraneous blinks, false positives, we check if the MIN_BLINK_INTERVAL
+                # has passed since the last blink, so that there is a cooldown period between actions
+                if now_time - last_blink_time > MIN_BLINK_INTERVAL:
+                        
+                        # Record the blink
+                        print("Blink detected!")
+                        blink_count += 1
+                        
+                        # Append to our local list of blink times in the current step
+                        last_blink_time = now_time
+                        blink_times.append(now_time)
+
+                        # # blink_times = [i for i in blink_times if now_time - i <= SEQUENCE_WINDOW]
+                        # print(f'blink_times: {blink_times}')
+                        # print(f'times_blinked: {times_blinked}')
+                        # print(magnitude_blinked)
+                        # print(epoch_timestamps)
+                        # # print(epoch_timestamps[MAX_AMP_index])
+                        # print()
+                        # # times_blinked = np.append(times_blinked, epoch_timestamps[MAX_AMP_index])
+                        # # magnitude_blinked = np.append(magnitude_blinked, MAX_AMP)
+
+                        # If the number of blinks aligns with our SEQUENCE_COUNT, we call the sequence blink action               
+                        if len(blink_times) >= SEQUENCE_COUNT:
+                            sequence_blink_action()
+                            blink_times.clear()
+                        # Otherwise, it is classified as a single blink action
+                        else:
+                            single_blink_action()
+
+                # print(f"Timestamp : {now_time}")
+                # print(f"Blinks: {blink_count}")
+
+                # Blink mask is a boolean array that indicates which samples are considered blinks
+                filtered_epoch_flattened = bandpass(epoch_data, fs).flatten()
+                blink_mask = (np.abs(filtered_epoch_flattened) > BLINK_MIN_THRESHOLD) & \
+                            (np.abs(filtered_epoch_flattened) < BLINK_MAX_THRESHOLD)
+
+                # Check if there are any blinks in the current epoch
+                # If so, append the blink data to the blink data accumulator
+                if blink_mask.any():
+                    blink_data_all = np.append(blink_data_all, filtered_epoch_flattened[blink_mask])
+                    blink_time_all = np.append(blink_time_all, epoch_timestamps[blink_mask])
+
+        # The current unix timestamp for this recording step
+        now_time = time.time()
+
+
+    # If the runtime reaches the desired maximum number of seconds
+
+    # Time to frequency domain converstion
+    # freqs, normalized_mag, mag = time_to_frequency_domain(entire_raw_data, fs)
+    
+    # Create the plot with the raw data (not filtered for blinks)
+    # plot_entire_timeANDfreq_data(freqs, normalized_mag, entire_raw_data, whole_timestamps, now_time, mag)
+    plt.plot(entire_raw_data)
+    plt.title("Live EEG Data Epoch")
+    plt.xlabel("Sample")
+    plt.ylabel("Amplitude")
+    plt.savefig(f"time_freq_{int(now_time)}.png")
+
+    # Create plot of frequency domain for raw and only during blink times,
+    # and show in the raw EEG data where we predict blinks to be happening, highlighted in red
+    # plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_timestamps, entire_raw_data, now_time, blink_time_all)
+
+    # Export raw data as csv (may remove later)
+    # export_raw_csv(blink_time_all, blink_data_all, whole_timestamps, entire_raw_data, now_time)
+    
+    # Stop the entire program and stop recording signals
+
+    print(f'collective_eeg_data: {collective_eeg_data}')
+
+    new_arr, abs = filter_data(collective_eeg_data, fs, epoch_data)
+
+    plt.figure(figsize=(10, 6))
+    # First subplot (top)
+    plt.subplot(1, 1, 1)
+    labels = [f"Datastream {i+1}" for i in range(collective_eeg_data.shape[1])]
+    plt.plot(new_arr, label = labels)
+    print(np.shape(collective_eeg_data))
+    plt.title("eeg_data")
+    plt.xlabel("time??")
+    plt.ylabel("eeg_data")
+    plt.legend()
+    plt.savefig(f"collective_eeg_data{now_time}.png")
+
+
+    print(collective_eeg_data)
+
+
+def filter_data(collective_eeg_data, fs, epoch_data):
+
+    # The filtered epoch is the epoch data with non-blink frequencies removed
+    print(collective_eeg_data[:, 1])
+    transposed_data = collective_eeg_data.T
+    tr_bandpassed_data = np.zeros_like(transposed_data)
+    for i in range(transposed_data.shape[0]):
+        tr_bandpassed_data[i] = bandpass(transposed_data[i], fs)
+    bandpassed_data = tr_bandpassed_data.T
+    print(f'filtered_epoch_1: {bandpassed_data}')
+    filtered_epoch_np = np.array(bandpassed_data)
+
+    MAX_AMP = np.max(bandpassed_data)
+    MAX_AMP_index = np.where(epoch_data == MAX_AMP)
+    # print(MAX_AMP)
+    # print(MAX_AMP_index)
+    # Append the filtered epoch data to the whole data set
+
+    new_arr = np.array([])
+
+    if len(new_arr) == 0:
+        new_arr = filtered_epoch_np
+    else:
+        new_arr = np.concatenate((collective_eeg_data, filtered_epoch_np))
+
+    return new_arr, np.abs(bandpassed_data) #abs
 
 """
 Create the plot of the raw EEG data on the bottom subplot and the frequency domain
@@ -254,14 +323,14 @@ on the top subplot
 Parameters:
     freqs: The frequencies of the FFT
     normalized_mag: The normalized magnitude of the FFT
-    whole_data: The entire neural recording, raw
+    entire_raw_data: The entire neural recording, raw
     whole_timestamps: The timestamps of the entire neural recording
     now_time: The current unix timestamp
     mag: The magnitude of the FFT
 
 The plot will also be saved as a PNG file named time_freq_<now_time>.png
 """
-def plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_time, mag):
+def plot_entire_timeANDfreq_data(freqs, normalized_mag, entire_raw_data, whole_timestamps, now_time, mag):
     plt.figure(figsize=(10, 6))
     # First subplot (top)
     plt.subplot(2, 1, 1)
@@ -274,7 +343,7 @@ def plot_entire_data(freqs, normalized_mag, whole_data, whole_timestamps, now_ti
     df_freq.to_csv('freq_data_with_timestamps_{int(now_time)}.csv', index=False)
     # Second subplot (bottom)
     plt.subplot(2, 1, 2)
-    plt.plot(whole_timestamps, whole_data)
+    plt.plot(whole_timestamps, entire_raw_data)
     plt.title("Live EEG Data Epoch")
     plt.xlabel("Sample")
     plt.ylabel("Amplitude")
@@ -290,13 +359,13 @@ Parameters:
     freqs: The frequencies of the FFT
     normalized_mag: The normalized magnitude of the FFT
     whole_timestamps: The timestamps of the entire neural recording
-    whole_data: The entire neural recording, raw
+    entire_raw_data: The entire neural recording, raw
     now_time: The current unix timestamp
     blink_time_all: The timestamps of the blinks
 
 This will also save the figure as a PNG file named blink_vs_all_<now_time>.png
 """
-def plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_timestamps, whole_data, now_time, blink_time_all):
+def plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_timestamps, entire_raw_data, now_time, blink_time_all):
     n_blink = len(blink_data_all)
     if n_blink > 0:
         fft_blink  = np.fft.rfft(blink_data_all)
@@ -322,7 +391,7 @@ def plot_blink_selected_data(blink_data_all, fs, freqs, normalized_mag, whole_ti
     plt.xlim(0, 10)
     # Raw data with blink samples highlighted
     plt.subplot(3, 1, 3)
-    plt.plot(whole_timestamps, whole_data, label='Full stream')
+    plt.plot(whole_timestamps, entire_raw_data, label='Full stream')
     plt.scatter(blink_time_all, blink_data_all, color='crimson', linewidth=2, label='Blink samples')
     # Make a purple scatter plot with only the local max and mins of the blink_data_all
     
@@ -352,13 +421,13 @@ Parameters:
     blink_time_all: The timestamps of the blinks
     blink_data_all: The EEG data at the blink timestamps
     whole_timestamps: The timestamps of the entire neural recording
-    whole_data: The entire neural recording, raw
+    entire_raw_data: The entire neural recording, raw
     now_time: The current unix timestamp
 """
-def export_raw_csv(blink_time_all, blink_data_all, whole_timestamps, whole_data, now_time):
-    df_time = pd.DataFrame({'timestamp': whole_timestamps, 'eeg_value': whole_data})
+def export_raw_csv(blink_time_all, blink_data_all, whole_timestamps, entire_raw_data, now_time):
+    df_time = pd.DataFrame({'timestamp': whole_timestamps, 'eeg_value': entire_raw_data})
     df_time.to_csv(f'time_data_with_timestamps_{int(now_time)}.csv', index=False)
-    df_blink = pd.DataFrame({'t': blink_time_all,'eeg': blink_data_all})
+    df_blink = pd.DataFrame({'timestamp': blink_time_all,'eeg_value': blink_data_all})
     df_blink.to_csv(f'blink_only_time_series_{int(now_time)}.csv', index=False)
             
 """
@@ -366,16 +435,16 @@ Convert data from a time-based domain to a frequency-based domain using
 a Fast Fourier Transform (FFT)
 
 Parameters:
-    whole_data: The entire neural recording, raw
+    entire_raw_data: The entire neural recording, raw
 
 Returns:
     normalized_mag: The normalized magnitude of the FFT
     freqs: The frequencies of the FFT
     mag: The magnitude of the FFT
 """
-def time_to_frequency_domain(whole_data, fs):
-    n = len(whole_data)
-    fft_vals = np.fft.rfft(whole_data)
+def time_to_frequency_domain(entire_raw_data, fs):
+    n = len(entire_raw_data)
+    fft_vals = np.fft.rfft(entire_raw_data)
     mag = np.abs(fft_vals) / n
     freqs = np.fft.rfftfreq(n, d = 1 / fs)
     mag_max = np.max(mag)
